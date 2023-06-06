@@ -1,0 +1,146 @@
+body {
+    background-color: #00303b;
+    font-family: Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+    padding: 20px;
+    padding-top: 0;
+    width: 100%;
+    overflow: hidden;
+}
+
+#splashScreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: url('../images/splash.jpg') no-repeat center center fixed;
+    background-size: cover;
+    z-index: 9999;
+}
+
+#splashText {
+    font-size: 5em;
+    color: white;
+}
+
+.banner {
+    text-align: center;
+    width: 100%;
+    background-color: #000000;
+    color: #ccc;
+    padding: 20px;
+    margin: 0 0 20px 0;
+}
+
+.game-container {
+    display: flex;
+    justify-content: space-around;
+    width: 100%;
+    width: 100vw; /* Use viewport units */
+    height: 100vh; /* Use viewport units */
+}
+
+.cards {
+    display: flex;
+    flex-direction: column;
+    /* justify-content: space-between; */
+    justify-content: safe;
+    width: 40%;
+}
+
+.card {
+    padding: 20px;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    text-align: center;
+    cursor: pointer;
+    height: 100px;
+    margin-bottom: 10px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.nft-pane {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    width: 40%;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    height: 350px;
+    background: grey;
+}
+
+#loader {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100px;
+    height: 100px;
+    border-radius: 50%;
+    background-color: white;
+}
+
+.shape-changing {
+    animation: changeShape 2s infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+@keyframes changeShape {
+    0%, 100% {
+        border-radius: 10%;
+    }
+
+    20% {
+        border-radius: 50% 10% 10% 10%;
+    }
+
+    40% {
+        border-radius: 50% 50% 10% 10%;
+    }
+
+    60% {
+        border-radius: 50% 50% 50% 10%;
+    }
+
+    80% {
+        border-radius: 50% 50% 50% 50%;
+    }
+}
+
+#nft-image {
+    display: none;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.success {
+    opacity: 1;
+}
+
+.failure {
+    opacity: 0;
+}
+
+.white-circle {
+    width: 100px;
+    height: 100px;
+    background-color: white;
+    border-radius: 50%;
+}
