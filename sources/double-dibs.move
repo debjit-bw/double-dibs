@@ -22,7 +22,6 @@ module doubledibs::gambler {
     struct Seed has key, store {
         id: UID,
         value: u64,
-        previous_value: u64,
         incremented_at: u64
     }
 
@@ -31,8 +30,6 @@ module doubledibs::gambler {
         id: UID,
         increment_modulo: u64,
         options: u64,
-        min_bet: u64,
-        max_bet: u64,
     }
 
     // Struct containing the map of player -> streak and Sui in reserves
@@ -45,9 +42,9 @@ module doubledibs::gambler {
     // NFT minted for winning a streak
     struct DibStreak has key, store {
         id: UID,
-        name: String,
-        power: u64,
-        timestamp: u64,
+        type: String,
+        stake: u64,
+        streak: u64,
     }
 
     // #####################################################################
@@ -70,8 +67,7 @@ module doubledibs::gambler {
     // This event is emitted after the winning card is picked and before the winning choice is matched with the player's choice
     struct Fairplay has copy, drop {
         block_timestamp: u64,
-        previous_seed: u64,
-        increment_modulo: u64,
+        seed_value: u64,
         options: u64
     }
 
@@ -93,16 +89,13 @@ module doubledibs::gambler {
         transfer::share_object(Seed { 
             id: object::new(ctx),
             value: 0, 
-            previous_value: 0, 
             incremented_at: 0 
         });
 
         transfer::share_object(Config { 
             id: object::new(ctx),
             increment_modulo: 101, 
-            options: 3, 
-            min_bet: 1 * SUI_PRECISION, 
-            max_bet: 1 * SUI_PRECISION
+            options: 2,
         });
 
         transfer::share_object(Store { 
@@ -129,8 +122,8 @@ module doubledibs::gambler {
         let stake_value = coin::value<SUI>(&stake);
         let stake_bal = coin::into_balance<SUI>(stake);
 
-        assert!(stake_value >= config.min_bet, ERR_BET_TOO_LOW);
-        assert!(stake_value <= config.max_bet, ERR_BET_TOO_HIGH);
+        // assert!(stake_value >= config.min_bet, ERR_BET_TOO_LOW);
+        // assert!(stake_value <= config.max_bet, ERR_BET_TOO_HIGH);
 
         let winning_choice = next_round(clock, config, seed);
         if (winning_choice == choice) {
@@ -194,14 +187,14 @@ module doubledibs::gambler {
         } else if (streak == 8) {
             name = string::utf8(b"Fire Gold");
         } else {
-            name = string::utf8(b"Cosmic Black");
+            name = string::utf8(b"Nebula Black");
         };
 
         let dib = DibStreak {
             id: object::new(ctx),
-            name: name,
-            power: streak,
-            timestamp: clock::timestamp_ms(clock)
+            type: name,
+            stake: stake_val(streak),
+            streak: streak,
         };
 
         event::emit( Dibs {
@@ -216,18 +209,17 @@ module doubledibs::gambler {
     }
 
     // #####################################################################
-    // ###########################  RANDOM FNS  ############################
+    // ############################  MATH FNS  #############################
     // #####################################################################
 
     public(friend) fun next_round(clock: &Clock, config: &Config, seed: &mut Seed): u64 {
-        update_seed(clock, config, seed);        
+        update_seed(clock, seed);
         let choice = make_choice(clock::timestamp_ms(clock) + seed.value, config.options);
 
         event::emit(Fairplay {
+            seed_value: seed.value,
+            options: config.options,
             block_timestamp: clock::timestamp_ms(clock),
-            previous_seed: seed.previous_value,
-            increment_modulo: config.increment_modulo,
-            options: config.options
         });
 
         return choice
@@ -237,14 +229,20 @@ module doubledibs::gambler {
         return seed % n
     }
 
-    fun update_seed(clock: &Clock, config: &Config, seed: &mut Seed) {
-        seed.previous_value = seed.value;
-        if (clock::timestamp_ms(clock) % config.options == 0) {
-            // for fairer probabilities, else some numbers are more likely to be picked
-            seed.value = (seed.value + 1) % ROUND_OFF;
-        };
-        seed.value = (seed.value + clock::timestamp_ms(clock) % config.increment_modulo) % ROUND_OFF;
+    fun update_seed(clock: &Clock, seed: &mut Seed) {
+        seed.value = (seed.value + 1) % ROUND_OFF;
         seed.incremented_at = clock::timestamp_ms(clock);
+    }
+
+    public(friend) fun stake_val(streak: u64): u64 {
+        if (streak == 0) return 1;
+        let i = streak - 1;
+        let val = 1;
+        while (i > 0) {
+            val = val * 2;
+            i = i - 1;
+        };
+        if (val == 1) 1 else val + 1
     }
 
     #[test_only]
@@ -259,7 +257,7 @@ module doubledibs::gambler_test {
     use std::string::{Self, String};
     use sui::clock::{Self, Clock};
     use sui::test_scenario::{Self, Scenario};
-    use doubledibs::gambler::{Self, Config, Seed, next_round};
+    use doubledibs::gambler::{Self, Config, Seed, next_round, stake_val};
 
     fun initialize(scenario: &mut Scenario) {
         debug::print<String>(&string::utf8(b"> gambler_test::initialize() <"));
@@ -300,7 +298,28 @@ module doubledibs::gambler_test {
             test_scenario::return_shared(config);
             test_scenario::return_shared(seed);
         };
-        
+
+        test_scenario::end(scenario);
+    }
+
+    #[test]
+    fun stake_val_test() {
+        let scenario = test_scenario::begin(@test_admin);
+        initialize(&mut scenario);
+
+        test_scenario::next_tx(&mut scenario, @test_admin); {
+            debug::print<String>(&string::utf8(b"> stake_val_test <"));
+            let i = 0;
+            while (i < 10) {
+                let val = stake_val(i);
+                debug::print<String>(&string::utf8(b"streak, val: "));
+                debug::print<u64>(&i);
+                debug::print<u64>(&val);
+                debug::print<String>(&string::utf8(b"---------------"));
+                i = i + 1;
+            };
+        };
+
         test_scenario::end(scenario);
     }
 }
