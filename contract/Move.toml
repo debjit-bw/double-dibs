@@ -8,3 +8,4 @@ Sui = { git = "https://github.com/MystenLabs/sui.git", subdir = "crates/sui-fram
 [addresses]
 doubledibs = "0x0"
 test_admin = "0x69"
+deployer = "0x292855f960c2cac03b141b1dfdcd0c48d6c65769e12e0b556a78077d7a9add68"

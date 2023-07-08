@@ -6,7 +6,6 @@ module doubledibs::gambler {
     use sui::clock::{Self, Clock};
     use std::string::{Self, String};
     use sui::event::{Self};
-    use sui::table::{Self, Table};
     use sui::sui::{SUI};
     use sui::balance::{Self, Balance};
     use sui::coin::{Self, Coin};
@@ -35,7 +34,6 @@ module doubledibs::gambler {
     // Struct containing the map of player -> streak and Sui in reserves
     struct Store has key, store {
         id: UID,
-        streaks: Table<address, u64>,
         reserves: Balance<SUI>,
     }
 
@@ -43,6 +41,7 @@ module doubledibs::gambler {
     struct DibStreak has key, store {
         id: UID,
         type: String,
+        owner: address,
         stake: u64,
         streak: u64,
     }
@@ -55,8 +54,9 @@ module doubledibs::gambler {
     const ROUND_OFF: u64 = 1_000_000;
     const SUI_PRECISION: u64 = 1_000_000_000;
     // Errors
-    const ERR_BET_TOO_LOW: u64 = 68;
-    const ERR_BET_TOO_HIGH: u64 = 70;
+    const ERR_STAKE_VAL_MISMATCH: u64 = 68;
+    const ERR_PLAYER_NOT_OWNER: u64 = 69;
+    const NOT_DEPLOYER: u64 = 403;
 
     // #####################################################################
     // #############################  EVENTS  ##############################
@@ -95,21 +95,81 @@ module doubledibs::gambler {
         transfer::share_object(Config { 
             id: object::new(ctx),
             increment_modulo: 101, 
-            options: 2,
+            options: 3,
         });
 
         transfer::share_object(Store { 
             id: object::new(ctx),
-            streaks: table::new(ctx),
             reserves: balance::zero<SUI>()
         });
+    }
+
+    // ######################################################################
+    // ############################  ADMIN FN  ##############################
+    // ######################################################################
+
+    fun return_to_admin(store: &mut Store,ctx: &mut TxContext) {
+        debug::print<String>(&string::utf8(b"> gambler::init() <"));
+
+        assert!(tx_context::sender(ctx) == @deployer, NOT_DEPLOYER);
+
+        let amount = balance::value<SUI>(&store.reserves);
+        let reserves = balance::split<SUI>(&mut store.reserves, amount);
+        transfer::public_transfer(coin::from_balance(reserves, ctx), @deployer);
     }
 
     // #####################################################################
     // ###########################  PUBLIC FNS  ############################
     // #####################################################################
 
-    public entry fun play<X>(
+    public entry fun play(
+        clock: &Clock,
+        seed: &mut Seed,
+        store: &mut Store,
+        config: &Config,
+        choice: u64,
+        stake: Coin<SUI>,
+        card: DibStreak,
+        ctx: &mut TxContext
+    ) {
+        let player = tx_context::sender(ctx);
+        let stake_value = coin::value<SUI>(&stake);
+        let stake_bal = coin::into_balance<SUI>(stake);
+
+        assert!(card.owner == player, ERR_PLAYER_NOT_OWNER);
+        assert!(stake_value == card.stake, ERR_STAKE_VAL_MISMATCH);
+
+        let winning_choice = next_round(clock, config, seed);
+        if (winning_choice == choice) {
+            // #### WIN ####
+            // 1. return staked card
+            // 2. mint new card and transfer
+            // 3. payout reward
+
+            let new_streak = card.streak + 1;
+
+            transfer::public_transfer(card, player);
+            mint_and_transfer(clock, new_streak, ctx);
+
+            // extract stake_value from reserves
+            let winnings = balance::split<SUI>(&mut store.reserves, stake_value);
+            balance::join(&mut stake_bal, winnings);
+        
+            let rewards = coin::from_balance(stake_bal, ctx);
+            transfer::public_transfer(rewards, player);
+        } else {
+            // #### LOST ####
+            // 1. burn card
+            // 2. transfer staked SUI to reserves
+
+            balance::join<SUI>(&mut store.reserves, stake_bal);
+
+            let DibStreak { id, type: _, owner: _, stake: _, streak: _ } = card;
+            object::delete(id);
+        };
+    }
+
+    public entry fun start(
         clock: &Clock,
         seed: &mut Seed,
         store: &mut Store,
@@ -122,45 +182,48 @@ module doubledibs::gambler {
         let stake_value = coin::value<SUI>(&stake);
         let stake_bal = coin::into_balance<SUI>(stake);
 
-        // assert!(stake_value >= config.min_bet, ERR_BET_TOO_LOW);
-        // assert!(stake_value <= config.max_bet, ERR_BET_TOO_HIGH);
+        assert!(stake_value == SUI_PRECISION, ERR_STAKE_VAL_MISMATCH);
 
         let winning_choice = next_round(clock, config, seed);
         if (winning_choice == choice) {
-            if (table::contains(&store.streaks, player)) {
-                // update streak
-                let streak = *table::borrow_mut(&mut store.streaks, player);
-                streak = streak + 1;
+            // #### WIN ####
+            // 1. mint new card and transfer
+            // 2. payout reward
 
-                // mint NFT
-                mint_and_transfer(clock, streak, ctx);
-            } else {
-                // start streak
-                table::add(&mut store.streaks, player, 1);
-
-                // no NFT mint as streak is 1 (created for the first time)
-            };
+            mint_and_transfer(clock, 1, ctx);
 
             // extract stake_value from reserves
             let winnings = balance::split<SUI>(&mut store.reserves, stake_value);
             balance::join(&mut stake_bal, winnings);
+        
+            let rewards = coin::from_balance(stake_bal, ctx);
+            transfer::public_transfer(rewards, player);
         } else {
-            // streak broken or no streak
-            if (table::contains(&store.streaks, player)) {
-                // streak broken
-                table::remove(&mut store.streaks, player);
+            // #### LOST ####
+            // 1. transfer staked SUI to reserves
 
-                // no NFT mint as streak is broken
-            } else {
-                // no streak
-                // no NFT mint as no streak
-            };
-            // transfer the stake to reserves
-            let transfers = balance::split<SUI>(&mut stake_bal, stake_value);
-            balance::join<SUI>(&mut store.reserves, transfers);
+            balance::join<SUI>(&mut store.reserves, stake_bal);
         };
-        let rewards = coin::from_balance(stake_bal, ctx);
-        transfer::public_transfer(rewards, player);
+    }
+
+    public entry fun overlord_mode(
+        store: &mut Store,
+        card: DibStreak,
+        ctx: &mut TxContext
+    ) {
+        // this mode allows the player to withdraw half of the treasury (till 5k SUI) and burn the card
+        let player = tx_context::sender(ctx);
+        assert!(card.owner == player, ERR_PLAYER_NOT_OWNER);
+
+        let reward_val = balance::value<SUI>(&store.reserves);
+        if (reward_val > 5 * SUI_PRECISION) reward_val = 5 * SUI_PRECISION;
+        let reward = balance::split<SUI>(&mut store.reserves, reward_val);
+        
+        let jackpot = coin::from_balance(reward, ctx);
+        transfer::public_transfer(jackpot, player);
+
+        let DibStreak { id, type: _, owner: _, stake: _, streak: _ } = card;
+        object::delete(id);
     }
 
     // #####################################################################
@@ -170,8 +233,10 @@ module doubledibs::gambler {
     fun mint_and_transfer(clock: &Clock, streak: u64, ctx: &mut TxContext) {
         let sender = tx_context::sender(ctx);
         let name: String;
-        if (streak < 2) {
+        if (streak < 1) {
             return
+        } else if (streak == 1) {
+            name = string::utf8(b"Genesis White");
         } else if (streak == 2) {
             name = string::utf8(b"Enigma Violet");
         } else if (streak == 3) {
@@ -193,6 +258,7 @@ module doubledibs::gambler {
         let dib = DibStreak {
             id: object::new(ctx),
             type: name,
+            owner: sender,
             stake: stake_val(streak),
             streak: streak,
         };
